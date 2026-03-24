@@ -21,6 +21,7 @@
 (require 'xml)
 (require 'evil-commands)
 (require 'pdf-view)
+(require 'org)
 
 ;; Parse out the xml response from url-retrive-synchronously
 (defun arxane-parse-xml-response-buffer (buffer)
@@ -131,6 +132,15 @@
               (side . right)
               (window-width . 0.6))))))))
 
+(defun arxane-kill-summary-window (&optional noskip)
+  (interactive)
+  (when-let ((win (get-buffer-window "*arxane-summary*")))
+    (delete-window win))
+  (when (get-buffer "*arxane-summary*")
+    (kill-buffer "*arxane-summary*"))
+  (unless noskip
+      (forward-line 1)))
+
 (defun arxane-toggle-mark-entry ()
   (interactive)
   (let ((summary (get-text-property (point) 'summary))
@@ -150,14 +160,16 @@
               (put-text-property line-start line-end 'marked nil)
               (message "Entry unmarked!"))))))))
 
-(defun arxane-kill-summary-window (&optional noskip)
+(defun arxane-export-marked-items ()
   (interactive)
-  (when-let ((win (get-buffer-window "*arxane-summary*")))
-    (delete-window win))
-  (when (get-buffer "*arxane-summary*")
-    (kill-buffer "*arxane-summary*"))
-  (unless noskip
-      (forward-line 1)))
+  (let ((results '()))
+    (save-excursion
+      (goto-char (point-min))
+      (while (not (eobp))
+        (when (get-text-property (point) 'marked)
+          (push (get-text-property (point) 'link) results))
+          (forward-line 1)))
+    (message (nth 0 results))))
 
 (defvar arxane-mode-map
   (let ((map (make-sparse-keymap)))
@@ -168,6 +180,13 @@
 
 (evil-define-key 'normal arxane-mode-map (kbd "RET") #'arxane-show-summary)
 (evil-define-key 'normal arxane-mode-map (kbd "m") #'arxane-toggle-mark-entry)
+(evil-define-key 'normal arxane-mode-map (kbd "x") #'arxane-export-marked-items)
+
+(defcustom arxane-reading-list (expand-file-name "arxane-reading-list.org" org-directory)
+  "File for storing the Arxane reading list."
+  :type 'file)
+
+
 
 (defun arxane ()
   "Create the arxane buffer."
