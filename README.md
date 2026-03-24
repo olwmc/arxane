@@ -1,6 +1,6 @@
 # Arxane
 # TODOS
-What would be really nice is a kind of YES/NO add interface wherein the o.g. list interface is sort of an outer layer. I'm imagining like a screen that looks like
+What would be really nice is a kind of YES/NO tinder-like add interface wherein the o.g. list interface is sort of an outer layer. I'm imagining like a screen that looks like
 
 ``` text
 arXiv:2603.19247v1 Announce Type: new 
@@ -9,3 +9,6 @@ Abstract: Large Language Models (LLMs) are increasingly integrated into high-sta
 
 
 - [ ] If the arxane-summary exists delete it first
+- [ ] Need some way of marking useful items
+- [ ] Figure out integration. Probably with org or something.
+- [ ] Clean up code / figure out standardization
