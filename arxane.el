@@ -34,7 +34,7 @@
 
 (defun arxane-get-feed ()
   "Return a feed in xml format."
-  (let ((response-buffer (url-retrieve-synchronously "http://rss.arxiv.org/atom/cs.cl")))
+  (let ((response-buffer (url-retrieve-synchronously "https://rss.arxiv.org/atom/cs.cl")))
     (arxane-parse-xml-response-buffer response-buffer)))
 
 ;; https://info.arxiv.org/help/atom_specifications.html
@@ -49,12 +49,12 @@
 (defun arxane-format-column (string width)
   (let ((len (length string)))
     (cond
-     ((< len width) (substring (concat string (make-string (- width len) ?\s)) 0 width)
+     ((< len width) (concat string (make-string (- width len) ?\s)))
      ((> len width) (substring string 0 width))
      (string))))
 
 (defun arxane-insert-item (item)
-  (let* ((name    (arxane-format-column (plist-get item 'title)))
+  (let* ((name    (arxane-format-column (plist-get item 'title) 70))
          (author  (arxane-format-column (plist-get item 'author) 30))
          (link    (plist-get item 'link))       ; was copying author
          (summary (plist-get item 'summary))
@@ -85,18 +85,24 @@
 
 (defun arxane-summary-open-pdf ()
   (interactive)
-  (let* ((article_link (get-text-property (point) 'link))
-         (pdf_link (concat "https://arxiv.org/pdf/" (nth 4 (split-string article_link "/")))))
-    (let ((response-buffer (url-retrieve-synchronously pdf_link)))
-      ;; Kill the summary window so we don't leak memory
-      ;; Swap to the new one
-      (switch-to-buffer response-buffer)
-      (kill-buffer "*arxane-summary*")))
-
-  ;; Now in the pdf buffer
-  (search-forward "%PDF")
-  (delete-region (point-min) (- (point) 4))
-  (pdf-view-mode))
+  (let* ((article-link (get-text-property (point) 'link))
+         (pdf-link (concat "https://arxiv.org/pdf/"
+                           (nth 4 (split-string article-link "/"))))
+         (tmp-file (make-temp-file "arxane-" nil ".pdf")))
+    (url-copy-file pdf-link tmp-file t)
+    (kill-buffer "*arxane-summary*")
+    (let ((buf (find-file-noselect tmp-file)))
+      (with-current-buffer buf
+        (pdf-view-mode)
+        (evil-define-key 'normal pdf-view-mode-map (kbd "q")
+          (lambda () (interactive)
+            (kill-buffer buf)
+            (delete-window))))
+      (select-window
+        (display-buffer buf
+          '(display-buffer-in-side-window
+            (side . right)
+            (window-width . 0.6)))))))
 
 (evil-define-key 'normal arxane-summary-mode-map (kbd "q") #'arxane-kill-summary-window)
 (evil-define-key 'normal arxane-summary-mode-map (kbd "RET") #'arxane-kill-summary-window)
@@ -123,14 +129,35 @@
           (display-buffer buf
             '(display-buffer-in-side-window
               (side . right)
-              (window-width . 0.4))))))))
+              (window-width . 0.6))))))))
 
-(defun arxane-kill-summary-window ()
+(defun arxane-toggle-mark-entry ()
+  (interactive)
+  (let ((summary (get-text-property (point) 'summary))
+        (marked  (get-text-property (point) 'marked)))
+    (if (not summary)
+        (message "No entry at point")
+      (let ((line-start (line-beginning-position))
+            (line-end   (line-end-position)))
+        (let ((inhibit-read-only t))
+          (if (not marked)
+              (progn
+                (put-text-property line-start line-end 'face '(:foreground "purple"))
+                (put-text-property line-start line-end 'marked t)
+                (message "Entry marked!"))
+            (progn
+              (put-text-property line-start line-end 'face '(:foreground "white"))
+              (put-text-property line-start line-end 'marked nil)
+              (message "Entry unmarked!"))))))))
+
+(defun arxane-kill-summary-window (&optional noskip)
   (interactive)
   (when-let ((win (get-buffer-window "*arxane-summary*")))
     (delete-window win))
-  (kill-buffer "*arxane-summary*")
-  (next-line))
+  (when (get-buffer "*arxane-summary*")
+    (kill-buffer "*arxane-summary*"))
+  (unless noskip
+      (forward-line 1)))
 
 (defvar arxane-mode-map
   (let ((map (make-sparse-keymap)))
@@ -140,13 +167,14 @@
   "Major mode for Arxane.")
 
 (evil-define-key 'normal arxane-mode-map (kbd "RET") #'arxane-show-summary)
+(evil-define-key 'normal arxane-mode-map (kbd "m") #'arxane-toggle-mark-entry)
 
 (defun arxane ()
   "Create the arxane buffer."
   (interactive)
-  (if (get-buffer "arxane")
-      (switch-to-buffer "arxane")
-    (with-current-buffer (get-buffer-create "arxane")
+  (if (get-buffer "arxane-arxiv")
+      (switch-to-buffer "arxane-arxiv")
+    (with-current-buffer (get-buffer-create "arxane-arxiv")
       (erase-buffer)
       (dolist (entry (arxane-get-entries))
         (arxane-insert-item entry))

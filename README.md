@@ -1,4 +1,6 @@
 # Arxane
+Keeping up with new arxiv papers is difficult. Arxane is an extensible emacs application for making this easier.
+
 # TODOS
 What would be really nice is a kind of YES/NO tinder-like add interface wherein the o.g. list interface is sort of an outer layer. I'm imagining like a screen that looks like
 
