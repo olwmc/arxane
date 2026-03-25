@@ -10,9 +10,10 @@ Abstract: Large Language Models (LLMs) are increasingly integrated into high-sta
 ```
 
 - [ ] If the arxane-summary exists delete it first
-- [ ] Need some way of marking useful items
-- [ ] Figure out integration. Probably with org or something.
-- [ ] Clean up code / figure out standardization
+- [x] Need some way of marking useful items
+- [x] Figure out integration. Probably with org or something.
 - [ ] If the entry is marked don't grey it out
 - [ ] Clean up and refactor the code into a real package
   - [ ] Lots of bleeding rn between different categories of functions needs to be fixed
+
+- [ ] Next real step is triage mode wherein we triage by abstract
