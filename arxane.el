@@ -55,7 +55,7 @@
      (string))))
 
 (defun arxane-insert-item (item)
-  (let* ((name    (arxane-format-column (plist-get item 'title) 70))
+  (let* ((name    (plist-get item 'title))
          (author  (arxane-format-column (plist-get item 'author) 30))
          (link    (plist-get item 'link))       ; was copying author
          (summary (plist-get item 'summary))
@@ -64,6 +64,8 @@
     (insert " ")
     (insert (propertize author 'face 'italic))
     (insert "\n")
+    (put-text-property start (point) 'title name)
+    (put-text-property start (point) 'author author)
     (put-text-property start (point) 'summary summary)
     (put-text-property start (point) 'link    link)))  ; both inside let*
 
@@ -109,6 +111,11 @@
 (evil-define-key 'normal arxane-summary-mode-map (kbd "RET") #'arxane-kill-summary-window)
 (evil-define-key 'normal arxane-summary-mode-map (kbd "o") #'arxane-summary-open-link)
 (evil-define-key 'normal arxane-summary-mode-map (kbd "p") #'arxane-summary-open-pdf)
+(evil-define-key 'normal arxane-summary-mode-map (kbd "m")
+  (lambda ()
+    (interactive)
+    (arxane-kill-summary-window t)
+    (arxane-toggle-mark-entry)))
 
 (defun arxane-show-summary ()
   (interactive)
@@ -152,24 +159,14 @@
         (let ((inhibit-read-only t))
           (if (not marked)
               (progn
-                (put-text-property line-start line-end 'face '(:foreground "purple"))
+                (put-text-property line-start line-end 'face '(:foreground "yellow"))
                 (put-text-property line-start line-end 'marked t)
                 (message "Entry marked!"))
             (progn
               (put-text-property line-start line-end 'face '(:foreground "white"))
               (put-text-property line-start line-end 'marked nil)
-              (message "Entry unmarked!"))))))))
-
-(defun arxane-export-marked-items ()
-  (interactive)
-  (let ((results '()))
-    (save-excursion
-      (goto-char (point-min))
-      (while (not (eobp))
-        (when (get-text-property (point) 'marked)
-          (push (get-text-property (point) 'link) results))
-          (forward-line 1)))
-    (message (nth 0 results))))
+              (message "Entry unmarked!"))))
+        (forward-line 1)))))
 
 (defvar arxane-mode-map
   (let ((map (make-sparse-keymap)))
@@ -186,7 +183,30 @@
   "File for storing the Arxane reading list."
   :type 'file)
 
+(defun arxane-export-marked-items ()
+  (interactive)
+  (when (y-or-n-p "Are you sure you want to export the marked items?")
+    (let ((results '()))
+      (save-excursion
+        (goto-char (point-min))
+        (while (not (eobp))
+          (when (get-text-property (point) 'marked)
+            (let ((title (get-text-property (point) 'title))
+                  (link  (get-text-property (point) 'link))
+                  (summary (get-text-property (point) 'summary))
+                  (author (get-text-property (point) 'author)))
+              (push (list 'title title 'link link 'summary summary 'author author) results)))
+            (forward-line 1)))
 
+        (dolist (res results)
+          (with-current-buffer (find-file-noselect arxane-reading-list)
+            (let ((title (plist-get res 'title ))
+                  (link (plist-get res 'link ))
+                  (summary (plist-get res 'summary ))
+                  (author (plist-get res 'author )))
+              (goto-char (point-max))
+              (insert (format "* TODO %s\n%s\n%s\n%s\n\n" title link author summary))
+              (save-buffer)))))))
 
 (defun arxane ()
   "Create the arxane buffer."
