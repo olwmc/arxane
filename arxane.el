@@ -23,15 +23,35 @@
 (require 'pdf-view)
 (require 'org)
 
+;;; ---------------------------------------------------------------------------
+;;; Customization
+;;; ---------------------------------------------------------------------------
+(defcustom arxane-reading-list (expand-file-name "arxane-reading-list.org" org-directory)
+  "File for storing the Arxane reading list."
+  :type 'file)
+
+(defcustom arxane-score-p nil
+  "Whether or not to score on startup"
+  :type 'boolean)
+
+;;; ---------------------------------------------------------------------------
+;;; Global entries state
+;;; ---------------------------------------------------------------------------
+(defvar-local arxane-entries nil
+  "List of entries for the current arxane buffer.")
+
+;;; ---------------------------------------------------------------------------
+;;; Feed Parsing
+;;; ---------------------------------------------------------------------------
 ;; Parse out the xml response from url-retrive-synchronously
 (defun arxane-parse-xml-response-buffer (buffer)
-   (with-current-buffer buffer
-      (goto-char (point-min))
-      ;; Skip past the HTTP headers to the XML body
-      (search-forward "\n\n")
-      (let ((feed-xml (nth 0 (xml-parse-region (point) (point-max)))))
-        (kill-buffer buffer)
-        feed-xml)))
+  (with-current-buffer buffer
+    (goto-char (point-min))
+    ;; Skip past the HTTP headers to the XML body
+    (search-forward "\n\n")
+    (let ((feed-xml (nth 0 (xml-parse-region (point) (point-max)))))
+      (kill-buffer buffer)
+      feed-xml)))
 
 (defun arxane-get-feed ()
   "Return a feed in xml format."
@@ -45,8 +65,14 @@
        (link (xml-get-attribute (car (xml-get-children entry 'link)) 'href))
        (summary (caddar(xml-get-children entry 'summary)))
        (author (caddar(xml-get-children entry 'dc:creator))))
-    (list 'title title 'link link 'summary summary 'author author)))
+    (list 'title title 'link link 'summary summary 'author author 'score 0)))
 
+(defun arxane-get-entries ()
+  (mapcar #'arxane-parse-entry (xml-get-children (arxane-get-feed) 'entry)))
+
+;;; ---------------------------------------------------------------------------
+;;; Display Helpers
+;;; ---------------------------------------------------------------------------
 (defun arxane-format-column (string width)
   (let ((len (length string)))
     (cond
@@ -54,24 +80,26 @@
      ((> len width) (substring string 0 width))
      (string))))
 
-(defun arxane-insert-item (item)
+(defun arxane-insert-item (item idx)
   (let* ((name    (plist-get item 'title))
          (author  (arxane-format-column (plist-get item 'author) 30))
-         (link    (plist-get item 'link))       ; was copying author
-         (summary (plist-get item 'summary))
+         (score   (plist-get item 'score))
          (start   (point)))
+
+    (when arxane-score-p
+      (insert
+       (propertize (concat "["(number-to-string score) "]") 'face '(:background "blue" :foreground "white")))
+      (insert " "))
+
     (insert (propertize name   'face 'bold))
     (insert " ")
     (insert (propertize author 'face 'italic))
     (insert "\n")
-    (put-text-property start (point) 'title name)
-    (put-text-property start (point) 'author author)
-    (put-text-property start (point) 'summary summary)
-    (put-text-property start (point) 'link    link)))  ; both inside let*
+    (put-text-property start (point) 'idx idx)))
 
-(defun arxane-get-entries ()
-  (mapcar #'arxane-parse-entry (xml-get-children (arxane-get-feed) 'entry)))
-
+;;; ---------------------------------------------------------------------------
+;;; Summary mode
+;;; ---------------------------------------------------------------------------
 (defvar arxane-summary-mode-map
   (let ((map (make-sparse-keymap)))
     map))
@@ -102,25 +130,34 @@
             (kill-buffer buf)
             (delete-window))))
       (select-window
-        (display-buffer buf
-          '(display-buffer-in-side-window
-            (side . right)
-            (window-width . 0.6)))))))
+       (display-buffer buf
+                       '(display-buffer-in-side-window
+                         (side . right)
+                         (window-width . 0.6)))))))
 
 (evil-define-key 'normal arxane-summary-mode-map (kbd "q") #'arxane-kill-summary-window)
-(evil-define-key 'normal arxane-summary-mode-map (kbd "RET") #'arxane-kill-summary-window)
+(evil-define-key 'normal arxane-summary-mode-map (kbd "RET")
+  (lambda ()
+    (interactive)
+    (arxane-kill-summary-window)
+    (arxane-show-summary)))
+
 (evil-define-key 'normal arxane-summary-mode-map (kbd "o") #'arxane-summary-open-link)
 (evil-define-key 'normal arxane-summary-mode-map (kbd "p") #'arxane-summary-open-pdf)
 (evil-define-key 'normal arxane-summary-mode-map (kbd "m")
   (lambda ()
     (interactive)
     (arxane-kill-summary-window t)
-    (arxane-toggle-mark-entry)))
+    (with-current-buffer (get-buffer "arxane-arxiv")
+      (arxane-toggle-mark-entry))
+    (arxane-show-summary)))
 
 (defun arxane-show-summary ()
   (interactive)
-  (let ((summary (get-text-property (point) 'summary))
-         (link (get-text-property (point) 'link)))
+  (let* ((entry (nth (get-text-property (point) 'idx) arxane-entries))
+         (summary (plist-get entry 'summary))
+         (link (plist-get entry 'link))
+         (title (plist-get entry 'title)))
     (if (not summary)
         (message "No entry at point")
       (let ((buf (get-buffer-create "*arxane-summary*"))
@@ -128,16 +165,18 @@
             (line-end   (line-end-position)))
         (with-current-buffer buf
           (erase-buffer)
+          (insert (propertize title 'face 'bold 'link link))
+          (insert "\n")
           (insert (propertize summary 'link link))
           (goto-char (point-min))
           (arxane-summary-mode))
         (let ((inhibit-read-only t))
           (remove-text-properties line-start line-end '(face nil)))
         (select-window
-          (display-buffer buf
-            '(display-buffer-in-side-window
-              (side . right)
-              (window-width . 0.6))))))))
+         (display-buffer buf
+                         '(display-buffer-in-side-window
+                           (side . right)
+                           (window-width . 0.6))))))))
 
 (defun arxane-kill-summary-window (&optional noskip)
   (interactive)
@@ -146,28 +185,25 @@
   (when (get-buffer "*arxane-summary*")
     (kill-buffer "*arxane-summary*"))
   (unless noskip
-      (forward-line 1)))
+    (forward-line 1)))
 
-(defun arxane-toggle-mark-entry ()
-  (interactive)
-  (let ((summary (get-text-property (point) 'summary))
-        (marked  (get-text-property (point) 'marked)))
-    (if (not summary)
-        (message "No entry at point")
-      (let ((line-start (line-beginning-position))
-            (line-end   (line-end-position)))
-        (let ((inhibit-read-only t))
-          (if (not marked)
-              (progn
-                (put-text-property line-start line-end 'face '(:foreground "yellow"))
-                (put-text-property line-start line-end 'marked t)
-                (message "Entry marked!"))
-            (progn
-              (put-text-property line-start line-end 'face '(:foreground "white"))
-              (put-text-property line-start line-end 'marked nil)
-              (message "Entry unmarked!"))))
-        (forward-line 1)))))
+;;; ---------------------------------------------------------------------------
+;;; Article Scoring
+;;; ---------------------------------------------------------------------------
+(defun arxane--score-entry (entry)
+  (let
+      ((title (plist-get entry 'title))
+       (link  (plist-get entry 'link))
+       (summary (plist-get entry 'summary))
+       (author (plist-get entry 'author)))
+    (plist-put entry 'score (random 200))))
 
+(defun arxane--compare-scores (e1 e2)
+  (> (plist-get e1 'score) (plist-get e2 'score)))
+
+;;; ---------------------------------------------------------------------------
+;;; Arxane Mode
+;;; ---------------------------------------------------------------------------
 (defvar arxane-mode-map
   (let ((map (make-sparse-keymap)))
     map))
@@ -179,34 +215,47 @@
 (evil-define-key 'normal arxane-mode-map (kbd "m") #'arxane-toggle-mark-entry)
 (evil-define-key 'normal arxane-mode-map (kbd "x") #'arxane-export-marked-items)
 
-(defcustom arxane-reading-list (expand-file-name "arxane-reading-list.org" org-directory)
-  "File for storing the Arxane reading list."
-  :type 'file)
+(defun arxane-toggle-mark-entry ()
+  (interactive)
+  (let ((idx (get-text-property (point) 'idx)))
+        (if (not idx)
+            (message "No entry at point")
+          (let* ((line-start (line-beginning-position))
+                 (line-end   (line-end-position))
+                 (entry (nth idx arxane-entries))
+                 (marked (plist-get entry 'marked)))
+            (let ((inhibit-read-only t))
+              (if (not marked)
+                  (progn
+                    (put-text-property line-start line-end 'face '(:foreground "yellow"))
+                    (setf (plist-get (nth idx arxane-entries) 'marked) t)
+                    (message "Entry marked!"))
+                (progn
+                  (put-text-property line-start line-end 'face '(:foreground "white"))
+                  (setf (plist-get (nth idx arxane-entries) 'marked) nil)
+                  (message "Entry unmarked!"))))
+            (forward-line 1)))))
 
 (defun arxane-export-marked-items ()
   (interactive)
   (when (y-or-n-p "Are you sure you want to export the marked items?")
-    (let ((results '()))
-      (save-excursion
-        (goto-char (point-min))
-        (while (not (eobp))
-          (when (get-text-property (point) 'marked)
-            (let ((title (get-text-property (point) 'title))
-                  (link  (get-text-property (point) 'link))
-                  (summary (get-text-property (point) 'summary))
-                  (author (get-text-property (point) 'author)))
-              (push (list 'title title 'link link 'summary summary 'author author) results)))
-            (forward-line 1)))
+      (dolist (res (seq-filter (lambda (e) (plist-get e 'marked)) arxane-entries))
+        (with-current-buffer (find-file-noselect arxane-reading-list)
+          (let ((title (plist-get res 'title ))
+                (link (plist-get res 'link ))
+                (summary (plist-get res 'summary ))
+                (author (plist-get res 'author )))
+            (goto-char (point-max))
+            (insert (format "\n* TODO %s\n%s\n%s\n%s\n\n" title link author summary))
+            (save-buffer))))))
 
-        (dolist (res results)
-          (with-current-buffer (find-file-noselect arxane-reading-list)
-            (let ((title (plist-get res 'title ))
-                  (link (plist-get res 'link ))
-                  (summary (plist-get res 'summary ))
-                  (author (plist-get res 'author )))
-              (goto-char (point-max))
-              (insert (format "* TODO %s\n%s\n%s\n%s\n\n" title link author summary))
-              (save-buffer)))))))
+(defun arxane--refresh ()
+  (let ((inhibit-read-only t))
+    (erase-buffer)
+    (if arxane-entries
+        (seq-do-indexed (lambda (entry idx)
+                          (arxane-insert-item entry idx)) arxane-entries)
+      (insert "No entries today"))))
 
 (defun arxane ()
   "Create the arxane buffer."
@@ -214,10 +263,13 @@
   (if (get-buffer "arxane-arxiv")
       (switch-to-buffer "arxane-arxiv")
     (with-current-buffer (get-buffer-create "arxane-arxiv")
-      (erase-buffer)
-      (dolist (entry (arxane-get-entries))
-        (arxane-insert-item entry))
       (arxane-mode)
+      (setq arxane-entries
+            (let ((raw (arxane-get-entries)))
+              (if arxane-score-p
+                  (sort (mapcar #'arxane--score-entry raw) #'arxane--compare-scores)
+                raw)))
+      (arxane--refresh)
       (evil-goto-first-line)
       (switch-to-buffer (current-buffer)))))
 
