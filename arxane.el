@@ -55,7 +55,7 @@
 
 (defun arxane-get-feed ()
   "Return a feed in xml format."
-  (let ((response-buffer (url-retrieve-synchronously "https://rss.arxiv.org/atom/cs.cl")))
+  (let ((response-buffer (url-retrieve-synchronously "https://rss.arxiv.org/atom/cs.cl+cs.lg")))
     (arxane-parse-xml-response-buffer response-buffer)))
 
 ;; https://info.arxiv.org/help/atom_specifications.html
