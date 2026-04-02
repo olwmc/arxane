@@ -26,3 +26,5 @@ Next immediate actions
 - [ ] 'read property
 - [ ] Press h to toggle only marked items
 - [ ] Don't destroy formatting when marking
+- [ ] Add left and right arrows
+- [ ] Put all articles under a date or something
